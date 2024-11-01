@@ -1,0 +1,189 @@
+---
+title: "lab9-HPC"
+format: html
+editor: visual
+author: Kessie SHEN
+embed-resources: true
+---
+## Problem 1: Vectorization
+```{r}
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
+install.packages("microbenchmark")
+
+library(microbenchmark)
+
+# using parallel
+fun1 <- function(n = 100, k = 4, lambda = 4) {
+  x <- NULL
+  
+  for (i in 1:n) {
+    x <- rbind(x, rpois(k, lambda))    
+  }
+  
+  return(x)
+}
+```
+
+# outputs are the same
+
+```{r}
+# more efficient without using parallel
+fun1alt <- function(n = 100, k = 4, lambda = 4) {
+  # Generate an n x k matrix with entries from a Poisson distribution
+  x <- matrix(rpois(n * k, lambda), nrow = n, ncol = k)
+  return(x)
+}
+n <- 100
+k <- 4
+lambda <- 4
+
+# Generate datasets using both functions
+set.seed(123)  # For reproducibility
+output1 <- fun1(n, k, lambda)
+output2 <- fun1alt(n, k, lambda)
+
+# Check dimensions
+identical(dim(output1), dim(output2))  # Should be TRUE
+
+# Check if the distributions are similar
+all.equal(output1, output2, tolerance = 0.01)
+library(microbenchmark)
+benchmark_result <- microbenchmark(
+  fun1(n, k, lambda),
+  fun1alt(n, k, lambda)
+)
+
+print(benchmark_result)
+
+```
+## This function finds the maximum value of each column of a matrix (hint: check out the max.col() function).
+
+```{r}
+# ORIGINAL
+fun2 <- function(x) {
+  apply(x, 2, max)
+}
+# More efficient
+fun2alt <- function(x) {
+  # Use the max.col function to find the maximum values
+  max_indices <- max.col(x, ties.method = "first")  # Get indices of max values
+  max_values <- x[cbind(1:nrow(x), max_indices)]  # Extract max values
+  return(max_values)
+}
+# Same Output
+# Data Generating Process (10 x 10,000 matrix)
+set.seed(1234)
+x <- matrix(rnorm(1e4), nrow=10)
+
+# Generate max values using both functions
+output3 <- fun2(x)
+output4 <- fun2alt(x)
+
+# Check if outputs are identical
+identical(output3, output4) 
+
+benchmark_result_fun2 <- microbenchmark(
+  fun2(x),
+  fun2alt(x)
+)
+
+print(benchmark_result_fun2)
+
+# Define functions
+fun2 <- function(x) {
+  apply(x, 2, max)
+}
+
+fun2alt <- function(x) {
+  apply(x, 2, max)
+}
+
+# Create input data
+set.seed(1234)
+x <- matrix(rnorm(1e4), nrow = 10)
+
+# Check outputs
+output_fun2 <- fun2(x)
+output_fun2alt <- fun2alt(x)
+identical(output_fun2, output_fun2alt)
+
+# Benchmark
+benchmark_result <- microbenchmark(
+  fun2(x),
+  fun2alt(x),
+  times = 100
+)
+print(benchmark_result)
+```
+```{r}
+library(parallel)
+
+# Define the function with parallelization
+my_boot <- function(dat, stat, R, ncpus = 1L) {
+  
+  # Getting the random indices
+  n <- nrow(dat)
+  idx <- matrix(sample.int(n, n * R, TRUE), nrow = n, ncol = R)
+  
+  # Set up the parallel cluster based on the number of CPUs
+  cl <- makeCluster(ncpus)
+  
+  # Parallelized computation with parLapply
+  ans <- parLapply(cl, seq_len(R), function(i) {
+    stat(dat[idx[, i], , drop = FALSE])
+  })
+  
+  # Stop the cluster
+  stopCluster(cl)
+  
+  # Convert the list into a matrix
+  ans <- do.call(rbind, ans)
+  
+  return(ans)
+}
+```
+
+## Check the speed
+```{r}
+library(parallel)
+
+# Define the statistic function
+my_stat <- function(d) coef(lm(y ~ x, data = d))
+
+# Parallelized bootstrap function
+my_boot <- function(dat, stat, R, ncpus = 1L) {
+  n <- nrow(dat)
+  idx <- matrix(sample.int(n, n * R, TRUE), nrow = n, ncol = R)
+  
+  cl <- makeCluster(ncpus)
+  clusterExport(cl, "my_stat")  # Exporting `my_stat` to cluster
+  
+  # Perform bootstrap in parallel
+  ans <- parLapply(cl, seq_len(R), function(i) stat(dat[idx[, i], , drop = FALSE]))
+  
+  stopCluster(cl)
+  do.call(rbind, ans)
+}
+
+# Set up data for testing
+set.seed(1)
+n <- 500
+R <- 4000
+x <- rnorm(n)
+y <- x * 5 + rnorm(n)
+
+# Run parallelized bootstrap
+system.time(ans1 <- my_boot(data.frame(x = x, y = y), my_stat, R = R, ncpus = 2L))
+
+# Check the bootstrapped confidence intervals
+boot_ci <- t(apply(ans1, 2, quantile, c(0.025, 0.975)))
+print(boot_ci)
+
+
+# Time with a single core
+# Time single-core vs. two-core performance
+system.time(my_boot(data.frame(x = x, y = y), my_stat, R = 4000, ncpus = 1L))
+system.time(my_boot(data.frame(x = x, y = y), my_stat, R = 4000, ncpus = 2L))
+
+```
